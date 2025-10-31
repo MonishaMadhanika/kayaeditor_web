@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Users collection: user can read/write own profile
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Diagrams
+    match /diagrams/{diagramId} {
+      allow read: if isSignedIn() && (isOwner(diagramId) || hasViewAccess(diagramId));
+      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isSignedIn() && (isOwner(diagramId) || hasEditAccess(diagramId));
+
+      // permissions subcollection
+      match /permissions/{emailDoc} {
+        // Owners can manage permissions
+        allow read: if isSignedIn() && (isOwner(diagramId) || hasEditAccess(diagramId));
+        allow write: if isSignedIn() && isOwner(diagramId);
+      }
+    }
+
+    function isOwner(diagramId) {
+      return get(/databases/$(database)/documents/diagrams/$(diagramId)).data.ownerId == request.auth.uid;
+    }
+
+    function hasViewAccess(diagramId) {
+      return hasAccess(diagramId, 'view') || hasAccess(diagramId, 'edit');
+    }
+
+    function hasEditAccess(diagramId) {
+      return hasAccess(diagramId, 'edit');
+    }
+
+    function hasAccess(diagramId, required) {
+      return exists(/databases/$(database)/documents/diagrams/$(diagramId)/permissions/$(lowerEmail())) &&
+        get(/databases/$(database)/documents/diagrams/$(diagramId)/permissions/$(lowerEmail())).data.access == required;
+    }
+
+    function lowerEmail() {
+      // Clients write both email and emailLower
+      return request.auth.token.email.lower();
+    }
+  }
+}
+
+
